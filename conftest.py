@@ -94,14 +94,89 @@ def registered_user(live_server, create_user):
 
 
 @pytest.fixture
-def base_url(live_server) -> str:
+def server_base_url(live_server) -> str:
+    """
+    服务根地址。
+
+    命名注意：不能用 `base_url` —— pytest-playwright 插件已定义同名 fixture（会话级），
+    会与函数级的 fixture 产生 ScopeMismatch 冲突。这里改用 `server_base_url` 避免冲突。
+    """
     return live_server.url
 
 
 @pytest.fixture
-def api(base_url) -> str:
+def api(server_base_url) -> str:
     """API 根路径，所有 djoser 端点挂在 /auth/ 下。"""
-    return f"{base_url}/auth"
+    return f"{server_base_url}/auth"
+
+
+@pytest.fixture
+def ui_page(ui_seed_data):
+    """
+    Playwright 页面对象（用例级）。
+
+    **关键约束：浏览器启动后不能再执行任何 ORM 操作。**
+
+    Playwright 的 sync API 会切换到自己的事件循环；一旦浏览器启动，
+    Django 检测到当前线程处于异步上下文，随后任何 ORM 调用都会抛
+    `SynchronousOnlyOperation: You cannot call this from an async context`。
+    （已实测确认：启动前 ORM 正常，启动后必然失败。）
+
+    因此所有测试数据必须在浏览器启动**之前**建好 —— 由 `ui_seed_data` fixture 完成，
+    它通过 `ui_page` 的依赖链保证顺序：建数据 → 启动浏览器 → 执行用例。
+
+    每个用例使用**独立的 BrowserContext**，cookie / session 完全隔离，
+    避免用例间登录态互相污染。
+
+    浏览器不可用时（未执行 `playwright install chromium`）整个 UI 模块跳过，
+    不影响接口测试的正常执行。
+    """
+    from playwright.sync_api import sync_playwright
+
+    try:
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(headless=True)
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(
+            f"Playwright 浏览器不可用（请先执行 playwright install chromium）：{exc}"
+        )
+
+    context = browser.new_context()
+    page = context.new_page()
+    page.set_default_timeout(15000)
+    try:
+        yield page
+    finally:
+        context.close()
+        browser.close()
+        pw.stop()
+
+
+@pytest.fixture
+def ui_seed_data(db):
+    """
+    在浏览器启动**之前**准备好 UI 测试所需的账号数据。
+
+    由于 Playwright 启动后无法再执行 ORM 操作，所有账号必须在此处一次性建好，
+    用例中只能通过 UI 交互（不能直接查库或建用户）。
+
+    提供两个账号：
+    - uitester   : 后台管理员（superuser）
+    - normaluser : 普通用户（无 admin 权限）
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    User.objects.create_superuser(
+        username="uitester", email="uitester@example.com", password="Adm1nPass!23"
+    )
+    User.objects.create_user(
+        username="normaluser", email="normaluser@example.com", password="Us3rPass!23"
+    )
+    return {
+        "admin": {"username": "uitester", "password": "Adm1nPass!23"},
+        "normal": {"username": "normaluser", "password": "Us3rPass!23"},
+    }
 
 
 @pytest.fixture(scope="session", autouse=True)
