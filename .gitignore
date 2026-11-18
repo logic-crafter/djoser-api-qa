@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 测试产物
+.pytest_cache/
+.reports/
+reports/
+htmlcov/
+.coverage
+coverage.xml
+*.sqlite3
+
+# 环境
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
