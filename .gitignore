@@ -13,6 +13,11 @@ htmlcov/
 coverage.xml
 *.sqlite3
 
+# 配置矩阵子进程的结果文件（旧版实现曾落在项目根目录）
+/default
+/email_login
+/email_login2
+
 # 环境
 .venv/
 venv/
