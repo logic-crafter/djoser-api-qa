@@ -20,7 +20,7 @@
 | --- | --- |
 | 被测项目 | sunscrapers/djoser（2.6k star，持续维护中） |
 | 被测版本 | djoser 2.3.x / Django 5.2.19 / DRF 3.x |
-| 被测接口数 | 12（注册 / 登录 / Token / 当前用户 / 密码 / 用户名） |
+| 被测接口数 | 8（注册 / 登录 / Token 登出 / 当前用户 / 改密码 / 重置密码 / 改用户名 / 重置用户名确认） |
 | 测试方式 | 黑盒 HTTP（`requests` + Django LiveServer）+ 白盒源码定位 |
 | 运行框架 | pytest 9.x + pytest-django + requests + jsonschema |
 | 用例总数 | **56** 条，实跑 **56/56 通过**，耗时约 173s |
