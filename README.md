@@ -23,7 +23,7 @@
 | 被测接口数 | 8（注册 / 登录 / Token 登出 / 当前用户 / 改密码 / 重置密码 / 改用户名 / 重置用户名确认） |
 | 测试方式 | 黑盒 HTTP（`requests` + Django LiveServer）+ 白盒源码定位 |
 | 运行框架 | pytest 9.x + pytest-django + requests + jsonschema |
-| 用例总数 | **56** 条，实跑 **56/56 通过**，耗时约 173s |
+| 用例总数 | **70** 条，实跑 **70/70 通过** |
 | 报告 | pytest-html 自包含报告 + Markdown 汇总 |
 | 发现缺陷 | **3 个真实缺陷**（2 严重 + 1 一般）+ 2 个行为观察项 |
 
@@ -34,15 +34,17 @@
 ```
 tests/
 ├── test_01_registration.py  # T01 注册流程：正常/重复/边界/注入/契约（15 条）
-├── test_02_login_token.py   # T02 登录与 Token：签发/校验/失效/防枚举（10 条）
+├── test_02_login_token.py   # T02 登录与 Token：签发/校验/失效/防枚举（11 条）
 ├── test_03_password.py      # T03 密码链路：修改/重置/确认/强度校验（8 条）
 ├── test_04_username.py      # T04 用户名链路：变更/边界/权限（8 条）
 ├── test_05_config_matrix.py # T05 配置矩阵：独立子进程复现缺陷（4 条）
 ├── test_06_contract.py      # T06 JSON Schema 契约一致性（6 条）
-└── test_07_concurrency.py   # T07 并发唯一性/幂等/脏写（4 条）
+├── test_07_concurrency.py   # T07 并发唯一性/幂等/脏写（4 条）
+└── test_08_ui.py            # T08 UI 自动化：Playwright 驱动 Django Admin（14 条）
 ```
 
 配置矩阵测试采用**独立子进程**执行，原因见「测试方法论要点」。
+UI 自动化测试针对 Django Admin 后台，需先执行 `playwright install chromium`。
 
 ### 3.2 用例设计方法
 
@@ -127,6 +129,9 @@ djoser 的注册、认证、改名三条主链路**全部断裂**：
 # 安装依赖
 pip install -r requirements.txt
 
+# UI 自动化需额外下载浏览器（一次性）
+playwright install chromium
+
 # 运行全量测试并生成报告
 pytest -v --html=reports/report.html --self-contained-html
 
@@ -138,6 +143,9 @@ pytest -m concurrency -v
 
 # 只跑契约校验
 pytest -m contract -v
+
+# 只跑 UI 自动化
+pytest -m ui -v
 ```
 
 ## 六、项目价值
@@ -204,7 +212,7 @@ GitHub Actions 的工作流文件位于 `docs/github-actions-ci.yml`。
 
 ## 十、测试方法论要点
 
-本项目在执行中沉淀了三条可复用的结论，均已写入代码注释：
+本项目在执行中沉淀了四条可复用的结论，均已写入代码注释：
 
 1. **配置类缺陷必须在进程边界上验证** —— djoser 的 `UserCreateSerializer.Meta.fields`
    在模块导入时就把 `settings.LOGIN_FIELD` 求值为静态元组，运行期 `override_settings`
@@ -213,3 +221,39 @@ GitHub Actions 的工作流文件位于 `docs/github-actions-ci.yml`。
    会导致后续登录必然失败、探针结果失真。
 3. **数据库选型影响跨线程可见性** —— `:memory:` SQLite 按连接隔离，
    LiveServer 线程看不到主线程创建的数据；改用文件型 SQLite 解决。
+4. **Playwright 的 sync API 与 Django ORM 存在根本冲突** —— 详见下节。
+
+### 10.1 Playwright sync API 与 Django ORM 的冲突（UI 自动化最深的一个坑）
+
+**现象**：浏览器启动后，任何 ORM 操作（`create_user`、`refresh_from_db`）都会抛
+
+```
+django.core.exceptions.SynchronousOnlyOperation:
+You cannot call this from an async context - use a thread or sync_to_async.
+```
+
+**根因**：Playwright 的 sync API 会切换到当前线程的事件循环。
+Django 检测到当前线程处于异步上下文后，会拒绝所有同步 ORM 调用。
+
+**结论**：**浏览器一旦启动，就不能再写库**。因此本项目：
+
+1. 所有测试数据在浏览器启动**之前**由 `ui_seed_data` fixture 一次性建好；
+2. 用例内**不做任何 ORM 调用** —— "修改是否生效"一律通过 UI 二次访问验证，
+   而不是 `refresh_from_db()`。
+
+这既是技术约束，也恰好符合 UI 自动化的真实意图：
+**验证用户看得见的行为，而不是绕过界面去查数据库**。
+
+### 10.2 两个选型上的坑
+
+- **未采用 `pytest-playwright` 插件**：该插件定义了会话级的 `base_url` 与
+  `browser_context_args`，与本项目函数级的 `server_base_url` / `live_server`
+  产生 `ScopeMismatch`，且其 fixture 链会把数据库初始化拖入异步上下文。
+  最终改为基于 Playwright 原生 `sync_api` 自建 `ui_page` fixture。
+- **Django Admin 的登出是表单按钮不是链接**：实际结构为
+  `<form id="logout-form"><button type="submit">Log out</button></form>`，
+  选择器应为 `#logout-form button[type=submit]`。
+- **客户端校验会拦截空值提交**：登录表单带 HTML5 `required`，
+  浏览器在客户端就阻止提交，服务端的 `ul.errorlist` 根本不会出现。
+  因此拆成两条用例：一条验证客户端校验生效，一条用 JS 移除 `required`
+  验证**服务端仍然拒绝**空凭据 —— 前端校验只是体验优化，真正的防线必须在服务端。
