@@ -45,6 +45,7 @@ DATABASES = {
 }
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sites",
@@ -83,7 +84,9 @@ TEMPLATES = [
     },
 ]
 
+# Django Admin 后台：作为 UI 自动化测试的被测界面
 STATIC_URL = "/static/"
+ADMIN_URL = "admin/"
 
 USE_TZ = True
 
