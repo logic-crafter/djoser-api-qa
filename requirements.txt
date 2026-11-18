@@ -6,3 +6,8 @@ pytest-django>=4.8
 pytest-html>=4.1
 requests>=2.31
 jsonschema>=4.20
+
+# UI 自动化（可选依赖）
+# 安装后还需执行： playwright install chromium
+pytest-playwright>=0.5
+playwright>=1.40
